@@ -11,7 +11,101 @@ try:
     import Tkinter as tk
 except ImportError:
     import tkinter as tk
-
+    
+class DateField(tk.Frame):
+    def __init__(self, parent, default_date=None, date_format='%Y-%m-%d', error_callback=None, interactive_text=True):
+        """
+        DateField: a widget combining a text field with a pop up DatePicker widget.
+        :param parent: the parent widget.
+        :param default_date=None: keyword argument that allows you to set the default date for this widget. 
+        If None (default), today is used.
+        :param date_format='%Y-%m-%d': keyword argument that allows you to specify valid input date format or
+        formats as a string or list/tuple of strings. These formats use the datetime.strptime syntax. When a user 
+        enters a date into the text field, it will be checked against each format in order; the first one that
+        strptime can use to parse the date is used. If none match, the user input is discarded and the error
+        callback is called (see next). When the text field is set automatically (either when the user input is
+        discarded or the user picks a date with the DatePicker widget) the first format is used to print the date.
+        :param error_callback=None: a function to call if user input errors occur. The function should accept one
+        two string inputs which will be the error message and error ID (or None). You can use this to provide 
+        feedback to the user via the GUI if they enter something incorrect. Current error IDs are:
+            'DateField:bad_string_format' - indicates the user entered a string in the text field that didn't match
+                any of the allowed date formats.
+        :param interactive_text=True: boolean value that controls whether the text field is an interactive Entry
+        widget (True) or a non-interactive Label widget (False). In the latter case, the user can only pick a date
+        through the DatePicker widget.
+        """
+        tk.Frame.__init__(self,parent)
+        if default_date is None:
+            self.date = dtime.today()
+        elif not isinstance(default_date, dtime):
+            raise TypeError('default_date must be a datetime.datetime instance or None')
+        else:
+            self.date = default_date
+            
+        if isinstance(date_format, (str, unicode)):
+            date_format = tuple([date_format])
+        elif isinstance(date_format, (list, tuple)):
+            date_format = tuple(date_format)
+        else:
+            raise TypeError('date_format must be a string, or list or tuple of strings (not {})'.format(type(date_format)))
+            
+        self.allowed_date_formats = tuple(date_format)
+        self.default_date_format = self.allowed_date_formats[0]
+        self.error_callback = error_callback
+        self._make_field_and_button(interactive_text=interactive_text)
+        
+    def _make_field_and_button(self, interactive_text=True):
+        """
+        init helper function that creates the text field and the button to pop up the calendar widget
+        :param interactive_text: boolean, if True (default) the text field is interactive and can have
+        date values entered in it (an Entry widget). If False, the text field is a Label widget and 
+        cannot be interacted with directly, but will reflect the date chosen from the calendar widget.
+        """
+        self._date_string = tk.StringVar()
+        self._date_string.set(self.date.strftime(self.default_date_format))
+        # This way responded to every single change to the text, not just when enter pressed or focus lost
+        #self._date_string.trace('w', lambda name, index, mode: self._update_date_from_text())
+        if interactive_text:
+            self.text_field = tk.Entry(self, textvariable=self._date_string)
+            self.text_field.bind('<Return>', self._update_date_from_text)
+            self.text_field.bind('<FocusOut>', self._update_date_from_text)
+        else:
+            self.text_field = tk.Label(self, textvariable=self._date_string)
+        self.text_field.pack()
+        
+    def _update_date_from_text(self, event):
+        """
+        Gets the current value of the date text box input and validates it against the allowed formats.
+        If the format is invalid, the text field will have the previous value restored and an error message
+        is sent to the bound error_callback.
+        :param event: an event instance passed to methods used with widget.bind. Not needed in this method.
+        """
+        i = 0
+        new_date_string = self._date_string.get()
+        print('Trying to set new date to', new_date_string)
+        while i < len(self.allowed_date_formats):
+            try:
+                new_date = dtime.strptime(new_date_string, self.allowed_date_formats[i])
+            except ValueError:
+                i+=1
+            else:
+                self.date = new_date
+                print('new_date is', new_date)
+                return
+        
+        # If we get here, the date string didn't match any of the input formats, so
+        # restore the current date as the string in the entry field and alert the program
+        # than something went wrong
+        self._date_string.set(self.date.strftime(self.default_date_format))
+        self._error('Date input "{}" does not match any of the allowed date formats'.format(new_date_string), 'DateField:bad_string_format')
+    
+    def _error(self, msg, id=None):
+        """
+        Sends error message to the defined callback function for errors, if the callback function is defined.
+        """
+        if self.error_callback is not None:
+            self.error_callback(msg, id)
+        
 
 # https://stackoverflow.com/questions/19087515/subclassing-tkinter-to-create-a-custom-widget
 class DatePicker(tk.Frame):
@@ -137,7 +231,8 @@ class DatePicker(tk.Frame):
         # We're going to cheat using the fact that for this calendar, the day of the month
         # doesn't matter (because we only use this function to change the current month)
         # so just force it to always be on the first of the month
-        target_year = int(months/12) + dt_in.year
+        curr_year = dt_in.year + (dt_in.month - 1)/12
+        target_year = int(curr_year + months/12)
         target_month = (dt_in.month + months - 1)%12 + 1  # the remove-add 1 is necessary for the modulus to return [1,12] instead of [0,11]
         return dt_in.replace(year=target_year, month=target_month, day=1)
 
@@ -147,8 +242,9 @@ class DatePicker(tk.Frame):
 
 if __name__ == '__main__':
     root = tk.Tk()
-    my_gui = DatePicker(root)
-    my_gui.pack()
+    #my_gui = DatePicker(root)
+    DateField(root).pack()
+    DateField(root, interactive_text=False).pack()
     # https://stackoverflow.com/questions/1892339/how-to-make-a-tkinter-window-jump-to-the-front
     root.lift()
     root.attributes('-topmost', True)
