@@ -5,14 +5,20 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 __metaclass__ = type  # Automatically makes Python 2 classes inherit from object to be new-style classes
 
 from calendar import monthrange
-import copy
-from datetime import datetime as dtime, timedelta as tdel
+from datetime import datetime as dtime, timedelta as tdel, time
+from PIL import ImageTk
+import os.path
 try:
     import Tkinter as tk
 except ImportError:
     import tkinter as tk
+
+_mydir = os.path.realpath(os.path.abspath(os.path.dirname(__file__)))
     
 class DateField(tk.Frame):
+    # Obtained from https://commons.wikimedia.org/wiki/File:Noun_project_-_Calendar.svg
+    calendar_file = os.path.join(_mydir, '..', 'resources', 'calendar-24.png')
+
     def __init__(self, parent, default_date=None, date_format='%Y-%m-%d', error_callback=None, interactive_text=True):
         """
         DateField: a widget combining a text field with a pop up DatePicker widget.
@@ -48,11 +54,19 @@ class DateField(tk.Frame):
             date_format = tuple(date_format)
         else:
             raise TypeError('date_format must be a string, or list or tuple of strings (not {})'.format(type(date_format)))
-            
+
+        # Temporary - I'll probably need to be able to change the size to fit the frame
+        self.line_height = 24
+
+        # This image must be created after tkinter has a root window, so we can't do it as
+        # a class variable
+        self.calendar_icon = ImageTk.PhotoImage(file=self.calendar_file, width=self.line_height, height=self.line_height)
+
         self.allowed_date_formats = tuple(date_format)
         self.default_date_format = self.allowed_date_formats[0]
         self.error_callback = error_callback
         self._make_field_and_button(interactive_text=interactive_text)
+
         
     def _make_field_and_button(self, interactive_text=True):
         """
@@ -71,7 +85,12 @@ class DateField(tk.Frame):
             self.text_field.bind('<FocusOut>', self._update_date_from_text)
         else:
             self.text_field = tk.Label(self, textvariable=self._date_string)
-        self.text_field.pack()
+
+        self.text_field.pack(side=tk.LEFT, fill=tk.X)#, ipady=(self.line_height - entry_height)/2.0)
+
+        self.calendar_button = tk.Button(self, image=self.calendar_icon, command=self._open_datepicker,
+                                         height=self.line_height, width=self.line_height)
+        self.calendar_button.pack(side=tk.LEFT)
         
     def _update_date_from_text(self, event):
         """
@@ -98,7 +117,28 @@ class DateField(tk.Frame):
         # than something went wrong
         self._date_string.set(self.date.strftime(self.default_date_format))
         self._error('Date input "{}" does not match any of the allowed date formats'.format(new_date_string), 'DateField:bad_string_format')
-    
+
+    def _update_date_from_picker(self, new_date):
+        self.date = new_date
+        self._date_string.set(self.date.strftime(self.default_date_format))
+        self.datepicker_frame.destroy()
+
+    def _open_datepicker(self):
+        # Get the x and y position on screen of the calendar button
+        button_coords = (self.calendar_button.winfo_rootx(), self.calendar_button.winfo_rooty())
+        # Position the calendar window to have it's top left corner centered on the button
+        dp_geo = '320x220+{}+{}'.format(*button_coords)
+        self.datepicker_frame = tk.Toplevel()
+        self.datepicker_frame.geometry(dp_geo)
+        # Remove title bar - https://stackoverflow.com/questions/44969674/remove-title-bar-in-python-3-tkinter-toplevel
+        self.datepicker_frame.wm_overrideredirect(True)
+        self.datepicker_frame.lift()
+        self.datepicker = DatePicker(self.datepicker_frame,
+                                     callback=self._update_date_from_picker,
+                                     curr_date=self.date)
+        self.datepicker.bind('<Leave>', lambda event: self.datepicker_frame.destroy())
+        self.datepicker.pack()
+
     def _error(self, msg, id=None):
         """
         Sends error message to the defined callback function for errors, if the callback function is defined.
@@ -121,16 +161,31 @@ class DatePicker(tk.Frame):
         """
         # I know that the first week of October 2017 conveniently starts on a Sunday
         dow_list = []
-        for day in DatePicker._iter_date(dtime(2017,10,1), dtime(2017,10,8)):
+        for day in DatePicker._iter_date(dtime(2017, 10, 1), dtime(2017, 10, 8)):
             dow_list.append(day.strftime('%a'))
         return dow_list
 
-    def __init__(self, parent):
+    def __init__(self, parent, callback=None, curr_date=None):
         # For testing, just put the buttons into a normal tkinter root window
         tk.Frame.__init__(self, parent)
-        self.day_callback = self._default_callback
+        if callback is None:
+            self.day_callback = self._default_callback
+        else:
+            self.day_callback = callback
+
+        # We use the selected date to highlight the button for the currently selected day,
+        # but because we iterate over the days at midnight when creating the calendar grid,
+        # the selected date MUST be at midnight.
+        if curr_date is None:
+            self.selected_date = dtime.combine(dtime.today(), time.min)
+            self.curr_month = self.selected_date
+        else:
+            self.selected_date = dtime.combine(curr_date, time.min)
+            self.curr_month = self.selected_date
+
+        self.selected_color = "yellow"
+
         self.day_buttons = []
-        self.curr_month = dtime.today()
         self.make_header()
         self.update_month()
         
@@ -178,8 +233,14 @@ class DatePicker(tk.Frame):
                 # When we get to Sunday again (as long as it's not the first day of the month), go to the next row
                 row += 1
 
+            if day == self.selected_date:
+                bg_color = self.selected_color
+            else:
+                bg_color = None
+
             # https://stackoverflow.com/questions/10865116/python-tkinter-creating-buttons-in-for-loop-passing-command-arguments
-            this_button = tk.Button(self, text=day.strftime('%d'), command=lambda this_day=day: self.day_callback(this_day))
+            this_button = tk.Button(self, text=day.strftime('%d'), highlightbackground=bg_color,
+                                    command=lambda this_day=day: self.day_callback(this_day))
             # http://effbot.org/tkinterbook/grid.htm
             this_button.grid(row=row, column=day_of_week)
             self.day_buttons.append(this_button)
@@ -244,7 +305,7 @@ if __name__ == '__main__':
     root = tk.Tk()
     #my_gui = DatePicker(root)
     DateField(root).pack()
-    DateField(root, interactive_text=False).pack()
+    DateField(root, interactive_text=False).pack(fill=tk.X)
     # https://stackoverflow.com/questions/1892339/how-to-make-a-tkinter-window-jump-to-the-front
     root.lift()
     root.attributes('-topmost', True)
