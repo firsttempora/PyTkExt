@@ -165,7 +165,7 @@ class DatePicker(tk.Frame):
             dow_list.append(day.strftime('%a'))
         return dow_list
 
-    def __init__(self, parent, callback=None, curr_date=None):
+    def __init__(self, parent, callback=None, curr_date=None, earliest_date=None, latest_date=None):
         # For testing, just put the buttons into a normal tkinter root window
         tk.Frame.__init__(self, parent)
         if callback is None:
@@ -182,6 +182,9 @@ class DatePicker(tk.Frame):
         else:
             self.selected_date = dtime.combine(curr_date, time.min)
             self.curr_month = self.selected_date
+
+        self.earliest_date = earliest_date
+        self.latest_date = latest_date
 
         self.selected_color = "yellow"
 
@@ -241,6 +244,9 @@ class DatePicker(tk.Frame):
             # https://stackoverflow.com/questions/10865116/python-tkinter-creating-buttons-in-for-loop-passing-command-arguments
             this_button = tk.Button(self, text=day.strftime('%d'), highlightbackground=bg_color,
                                     command=lambda this_day=day: self.day_callback(this_day))
+            if day < self.earliest_date or day > self.latest_date:
+                this_button.config(state=tk.DISABLED)
+
             # http://effbot.org/tkinterbook/grid.htm
             this_button.grid(row=row, column=day_of_week)
             self.day_buttons.append(this_button)
